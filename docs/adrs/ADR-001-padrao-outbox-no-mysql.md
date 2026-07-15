@@ -1,0 +1,72 @@
+# ADR-001: Padrão Outbox no MySQL para Garantia de Consistência dos Eventos de Webhook
+
+**Status:** Aceito
+**Data:** 2026-07-14
+**ADRs Relacionados:** (nenhum — este é o ADR fundacional da feature de webhooks)
+
+---
+
+## 1. Contexto e Problema
+
+O sistema de gerenciamento de pedidos (OMS) recebeu solicitação formal de três clientes B2B — Atlas Comercial, MaxDistribuição e Nova Cargo — para notificação em tempo real sobre mudanças de status de pedidos ([09:00] Marcos). Atualmente, esses clientes realizam polling manual via `GET /orders`, gerando integração lenta e custosa. A Atlas Comercial sinalizou risco de churn caso a entrega não ocorra até o fim do trimestre.
+
+O núcleo do problema é arquitetural: como garantir que, ao mudar o status de um pedido, o evento de notificação seja disparado de forma confiável e consistente, sem comprometer a atomicidade da transação existente nem introduzir dependência em sistemas externos? A transação de mudança de status já é composta por múltiplas operações (atualização do pedido, registro de histórico e controle de estoque), e qualquer falha de entrega não pode forçar rollback do status do pedido.
+
+A solução precisa atender ao requisito de latência estabelecido pelos clientes: abaixo de 10 segundos entre a mudança de status e a notificação ([09:02] Marcos), com escopo restrito a webhooks de saída — o sistema envia, os clientes recebem ([09:02] Sofia e Marcos).
+
+## 2. Fatores de Decisão
+
+- A transação de mudança de status é composta por múltiplas operações críticas; um HTTP call síncrono criaria acoplamento inaceitável com sistemas externos ([09:04] Bruno).
+- Indisponibilidade do cliente receptor não pode forçar rollback do status do pedido — as duas operações devem ser desacopladas ([09:04] Bruno).
+- O time é pequeno; soluções que exijam nova infraestrutura (Redis Cluster, Kafka) representam overengineering para o contexto atual ([09:07] Diego).
+- A garantia de consistência entre "status atualizado" e "evento registrado" deve ser atômica — ou ambos ocorrem, ou nenhum ocorre.
+- O requisito de latência de menos de 10 segundos pode ser atendido sem reatividade em tempo real ([09:10] Marcos e Diego).
+
+## 3. Opções Consideradas
+
+1. **Padrão Outbox no MySQL existente** (opção escolhida)
+2. **Disparo síncrono dentro do service de pedidos**
+3. **Redis Streams ou fila externa**
+
+## 4. Decisão
+
+Escolhida a opção **Padrão Outbox no MySQL existente**, porque garante atomicidade entre a mudança de status e o registro do evento sem introduzir nova infraestrutura, atendendo ao requisito de latência e ao contexto de time pequeno ([09:06]–[09:08] Diego, com consenso de Larissa, Bruno e Marcos).
+
+A decisão estabelece que, dentro da mesma transação Prisma que atualiza o pedido, registra o histórico e ajusta o estoque, uma inserção na tabela `webhook_outbox` é realizada como operação adicional. O ponto de integração no código existente é `src/modules/orders/order.service.ts:126-179`. Um worker separado (processo distinto da API) realiza polling periódico dessa tabela e efetua as chamadas HTTP aos endpoints dos clientes.
+
+Duas sub-decisões foram registradas em consenso na mesma sessão: (1) o payload é serializado como snapshot do estado do pedido no momento da inserção, não no momento do envio, garantindo que o evento reflita o estado exato da transição ([09:52] Larissa e Diego); e (2) a filtragem por status subscrito ocorre na inserção, evitando linhas desnecessárias para eventos que o endpoint não consome ([09:34] Bruno e Diego).
+
+## 5. Prós e Contras das Opções
+
+### Padrão Outbox no MySQL existente
+
+- Positivo: Atomicidade entre transação de negócio e registro do evento é garantida pelo banco de dados.
+- Positivo: Zero nova infraestrutura; aproveita MySQL já operacional.
+- Positivo: Snapshot na inserção elimina risco de evento com dados desatualizados.
+- Negativo: A tabela `webhook_outbox` co-existe no banco OLTP de pedidos, exigindo política de arquivamento periódico de eventos entregues.
+
+### Disparo síncrono dentro do service de pedidos
+
+- Positivo: Implementação mais simples, sem worker adicional.
+- Negativo: Clientes lentos travam a transação de mudança de status para outros pedidos ([09:04] Bruno).
+- Negativo: Indisponibilidade do cliente forçaria rollback da mudança de status ([09:04] Bruno).
+- Negativo: Acoplamento forte entre disponibilidade de sistemas externos e operações internas.
+
+### Redis Streams ou fila externa
+
+- Positivo: Maior capacidade de escala horizontal e separação de responsabilidades.
+- Negativo: Requer nova infraestrutura (Redis Cluster ou equivalente) — overengineering para o contexto atual ([09:07] Diego).
+- Negativo: A consistência entre transação de banco e publicação na fila exigiria padrões adicionais (two-phase commit ou Outbox de qualquer forma).
+
+## 6. Consequências
+
+A adoção do Padrão Outbox no MySQL estabelece a âncora arquitetural de toda a feature de webhooks. As decisões subsequentes — worker com polling, estratégia de retry, gerenciamento de Dead Letter Queue e autenticação HMAC — derivam diretamente desta. Alterar este padrão implicaria redesenhar a feature integralmente.
+
+A tabela `webhook_outbox` co-existindo no banco OLTP de pedidos cria uma responsabilidade operacional nova: o arquivamento ou purge periódico de eventos com status entregue. A janela sugerida na reunião foi de 30 dias ([09:08] Diego), mas a política formal de retenção não foi definida no escopo desta decisão e deverá ser estabelecida antes da operação em produção.
+
+A garantia de ordenação de eventos é implícita por `order_id` enquanto houver um único worker em execução. Escalar para múltiplos workers simultâneos remove essa garantia; para esse cenário futuro, particionamento por `order_id` ou lock pessimista seriam necessários ([09:12]–[09:13] Diego). Esta limitação foi documentada e aceita pela equipe, pois os clientes não requisitaram ordenação global ([09:14] Marcos).
+
+## 7. Referências
+
+- `src/modules/orders/order.service.ts:126-179` — método `changeStatus()`, ponto de integração onde a inserção na outbox deve ocorrer como última operação dentro da transação existente.
+- `prisma/schema.prisma` — schema atual sem as tabelas de webhook; as tabelas `webhook_outbox`, `webhook_dead_letter`, `webhook_deliveries` e `webhook_endpoints` deverão ser adicionadas via migração Prisma.

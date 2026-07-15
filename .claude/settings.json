@@ -1,0 +1,5 @@
+{
+  "enabledPlugins": {
+    "adrs-management@fullcycle-claude-marketplace": true
+  }
+}
