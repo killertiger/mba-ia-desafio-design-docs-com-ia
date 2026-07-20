@@ -45,14 +45,14 @@ O número 5 de tentativas foi calibrado para cobrir a janela de até ~15 horas e
 
 A DLQ como tabela separada, e não como status FAILED na outbox, foi escolhida para manter a outbox principal com semântica clara de eventos ativos, enquanto a DLQ serve de evidência auditável para debug e reprocessamento. O reprocessamento manual via endpoint `POST /admin/webhooks/dead-letter/:id/replay`, protegido por papel ADMIN (`[09:35]`–`[09:36]` Larissa e Sofia), garante que ações sobre a DLQ sejam intencionais e rastreáveis.
 
-[NECESSITA INPUT: Qual é a política de retenção da tabela `webhook_dead_letter`? Os eventos devem ser purgados automaticamente após um período definido (ex: 90 dias) ou permanecem indefinidamente até reprocessamento manual?]
+[PRECISA DE INFORMAÇÃO: Qual é a política de retenção da tabela `webhook_dead_letter`? Os eventos devem ser purgados automaticamente após um período definido (ex: 90 dias) ou permanecem indefinidamente até reprocessamento manual?]
 
 ## 5. Prós e Contras das Opções
 
 ### Opção A — 5 tentativas com backoff exponencial e DLQ em tabela separada
 
 **Prós:**
-- Cobre janelas de manutenção planejada de até 2 horas com margem considerável antes da 3ª tentativa.
+- Cobre janelas de manutenção planejada de até 2 horas: com os intervalos acumulados (1m, 6m, 36m, ~2h36m), a tentativa em torno de 2h36 recupera o evento, margem que a Opção B de 3 tentativas (~30 min) não alcança (`[09:16]` Diego).
 - DLQ separada preserva a legibilidade da outbox principal e serve como evidência estruturada para suporte.
 - Endpoint de replay com restrição de papel ADMIN reutiliza infraestrutura existente (`src/middlewares/auth.middleware.ts:49`).
 - Ciclo de ~15 horas validado como aceitável pelos stakeholders de negócio.
@@ -86,9 +86,9 @@ A implementação desta estratégia estabelece um contrato operacional implícit
 
 A tabela `webhook_dead_letter` acumula evidência de falhas permanentes. O campo de rastreabilidade de replay (`replayed_by`, `replayed_at`) é requisito explícito de auditoria levantado por Sofia (`[09:36]`): "o endpoint de admin tem que logar quem fez o replay, pra auditoria." O logging estruturado via Pino deve registrar cada ação de replay com identidade do executor e identificador do evento.
 
-[NECESSITA INPUT: Após um replay manual, o evento recolocado na outbox deve reiniciar o `attempt_count` para zero ou manter o histórico acumulado de tentativas anteriores? A resposta afeta tanto a lógica do endpoint de replay quanto a semântica dos campos da DLQ.]
+[PRECISA DE INFORMAÇÃO: Após um replay manual, o evento recolocado na outbox deve reiniciar o `attempt_count` para zero ou manter o histórico acumulado de tentativas anteriores? A resposta afeta tanto a lógica do endpoint de replay quanto a semântica dos campos da DLQ.]
 
-[NECESSITA INPUT: Como o worker detecta e recupera eventos travados no estado PROCESSING em caso de crash durante uma tentativa de envio? Uma estratégia de timeout por estado (ex: marcar como pendente novamente após N minutos em PROCESSING) precisa ser definida para evitar eventos orphaned.]
+A detecção e recuperação de eventos travados no estado `PROCESSING` após crash do worker é um item em aberto do ciclo de vida do worker, tratado no ADR-002 (Worker em Processo Separado com Polling) — ver o marcador de pendência na seção 6 daquele documento. A definição adotada lá governa também o comportamento de retry descrito aqui.
 
 ## 7. Referências
 

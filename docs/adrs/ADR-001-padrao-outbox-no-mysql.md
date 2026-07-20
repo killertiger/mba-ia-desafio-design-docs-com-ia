@@ -20,6 +20,7 @@ A solução precisa atender ao requisito de latência estabelecido pelos cliente
 - Indisponibilidade do cliente receptor não pode forçar rollback do status do pedido — as duas operações devem ser desacopladas ([09:04] Bruno).
 - O time é pequeno; soluções que exijam nova infraestrutura (Redis Cluster, Kafka) representam overengineering para o contexto atual ([09:07] Diego).
 - A garantia de consistência entre "status atualizado" e "evento registrado" deve ser atômica — ou ambos ocorrem, ou nenhum ocorre.
+- O acúmulo de eventos na tabela é uma preocupação legítima de performance ([09:07] Bruno), endereçável por indexação e leitura em batch sem exigir infraestrutura adicional ([09:08] Diego).
 - O requisito de latência de menos de 10 segundos pode ser atendido sem reatividade em tempo real ([09:10] Marcos e Diego).
 
 ## 3. Opções Consideradas
@@ -34,7 +35,9 @@ Escolhida a opção **Padrão Outbox no MySQL existente**, porque garante atomic
 
 A decisão estabelece que, dentro da mesma transação Prisma que atualiza o pedido, registra o histórico e ajusta o estoque, uma inserção na tabela `webhook_outbox` é realizada como operação adicional. O ponto de integração no código existente é `src/modules/orders/order.service.ts:126-179`. Um worker separado (processo distinto da API) realiza polling periódico dessa tabela e efetua as chamadas HTTP aos endpoints dos clientes.
 
-Duas sub-decisões foram registradas em consenso na mesma sessão: (1) o payload é serializado como snapshot do estado do pedido no momento da inserção, não no momento do envio, garantindo que o evento reflita o estado exato da transição ([09:52] Larissa e Diego); e (2) a filtragem por status subscrito ocorre na inserção, evitando linhas desnecessárias para eventos que o endpoint não consome ([09:34] Bruno e Diego).
+O desenho operacional da tabela acompanha a decisão ([09:08] Diego): cada evento transita entre quatro estados — pendente, processando, falhou e entregue — com índice no campo de status e em `created_at`. O worker lê apenas os eventos pendentes mais antigos, em batch pequeno, processa e marca como entregue. Isso mantém o custo de leitura estável independentemente do volume de linhas já entregues acumuladas na tabela, respondendo à preocupação de performance levantada em [09:07] por Bruno.
+
+Três sub-decisões foram registradas em consenso na mesma sessão: (1) o payload é serializado como snapshot do estado do pedido no momento da inserção, não no momento do envio, garantindo que o evento reflita o estado exato da transição ([09:52] Larissa e Diego); (2) a filtragem por status subscrito ocorre na inserção, evitando linhas desnecessárias para eventos que o endpoint não consome ([09:34] Bruno e Diego); e (3) a chave primária da outbox é UUID, seguindo o padrão já adotado em todos os models do schema atual ([09:51] Diego e Larissa).
 
 ## 5. Prós e Contras das Opções
 
@@ -43,6 +46,7 @@ Duas sub-decisões foram registradas em consenso na mesma sessão: (1) o payload
 - Positivo: Atomicidade entre transação de negócio e registro do evento é garantida pelo banco de dados.
 - Positivo: Zero nova infraestrutura; aproveita MySQL já operacional.
 - Positivo: Snapshot na inserção elimina risco de evento com dados desatualizados.
+- Positivo: Índice em status e `created_at`, com leitura em batch apenas dos pendentes, mantém o custo de leitura do worker estável conforme a tabela cresce ([09:08] Diego).
 - Negativo: A tabela `webhook_outbox` co-existe no banco OLTP de pedidos, exigindo política de arquivamento periódico de eventos entregues.
 
 ### Disparo síncrono dentro do service de pedidos
@@ -62,11 +66,11 @@ Duas sub-decisões foram registradas em consenso na mesma sessão: (1) o payload
 
 A adoção do Padrão Outbox no MySQL estabelece a âncora arquitetural de toda a feature de webhooks. As decisões subsequentes — worker com polling, estratégia de retry, gerenciamento de Dead Letter Queue e autenticação HMAC — derivam diretamente desta. Alterar este padrão implicaria redesenhar a feature integralmente.
 
-A tabela `webhook_outbox` co-existindo no banco OLTP de pedidos cria uma responsabilidade operacional nova: o arquivamento ou purge periódico de eventos com status entregue. A janela sugerida na reunião foi de 30 dias ([09:08] Diego), mas a política formal de retenção não foi definida no escopo desta decisão e deverá ser estabelecida antes da operação em produção.
+A tabela `webhook_outbox` co-existindo no banco OLTP de pedidos cria uma responsabilidade operacional nova: o arquivamento ou purge periódico de eventos com status entregue. A janela sugerida na reunião foi de 30 dias, e a equipe delimitou explicitamente o arquivamento como fora do escopo desta feature ([09:08] Diego). A política formal de retenção permanece, portanto, em aberto para trabalho futuro.
 
 A garantia de ordenação de eventos é implícita por `order_id` enquanto houver um único worker em execução. Escalar para múltiplos workers simultâneos remove essa garantia; para esse cenário futuro, particionamento por `order_id` ou lock pessimista seriam necessários ([09:12]–[09:13] Diego). Esta limitação foi documentada e aceita pela equipe, pois os clientes não requisitaram ordenação global ([09:14] Marcos).
 
 ## 7. Referências
 
-- `src/modules/orders/order.service.ts:126-179` — método `changeStatus()`, ponto de integração onde a inserção na outbox deve ocorrer como última operação dentro da transação existente.
+- `src/modules/orders/order.service.ts:126-179` — método `changeStatus()`, ponto de integração onde a inserção na outbox deve ocorrer dentro da transação existente ([09:40] Bruno).
 - `prisma/schema.prisma` — schema atual sem as tabelas de webhook; as tabelas `webhook_outbox`, `webhook_dead_letter`, `webhook_deliveries` e `webhook_endpoints` deverão ser adicionadas via migração Prisma.

@@ -32,7 +32,7 @@ As alternativas consideradas se concentram no mecanismo de acionamento do worker
 
 Escolhida a **Opção A — Worker em processo separado com polling periódico**, porque o MySQL não oferece mecanismo nativo de notificação de processo externo equivalente ao `NOTIFY/LISTEN` do PostgreSQL ([09:09] Diego), tornando o polling a abordagem mais simples e confiável disponível. O intervalo de 2 segundos atende com folga o requisito de latência máxima de 10 segundos ([09:10] Larissa). A separação em processo distinto garante que reinicializações da API não interrompam eventos em processamento ([09:11] Diego).
 
-A entry-point `src/worker.ts` espelha o padrão do `src/server.ts` existente, incluindo instância própria do cliente de banco e shutdown gracioso. O script `npm run worker` é adicionado ao `package.json` de forma análoga aos scripts de servidor já existentes ([09:11] Larissa).
+A entry-point `src/worker.ts` espelha o padrão do `src/server.ts` existente: bootstrap assíncrono, logger compartilhado e shutdown gracioso em SIGINT/SIGTERM. O cliente de banco é próprio do worker — mesmo banco e mesma `DATABASE_URL`, instância nova porque é outro processo Node ([09:30] Bruno). Como o `server.ts` importa o singleton `prisma` de `src/config/database.ts` e a factory `createPrismaClient()` está exportada no mesmo módulo, qualquer um dos dois caminhos satisfaz a decisão: em um processo distinto, ambos produzem um cliente novo. O script `npm run worker` é adicionado ao `package.json` de forma análoga aos scripts de servidor já existentes ([09:11] Larissa).
 
 ## 5. Prós e Contras das Opções
 
@@ -47,7 +47,7 @@ A entry-point `src/worker.ts` espelha o padrão do `src/server.ts` existente, in
 ### Opção B — Worker embutido no processo da API
 
 - Positivo: deploy simplificado — apenas um processo para gerenciar.
-- Negativo: ciclo de vida acoplado — reinicialização da API mata o worker e pode deixar eventos com status `PROCESSING` travados ([09:11] Diego).
+- Negativo: ciclo de vida acoplado — reinicialização da API mata o worker ([09:11] Diego), o que pode deixar eventos com status `PROCESSING` travados.
 - Negativo: falha no worker pode impactar a estabilidade da API e vice-versa.
 
 ### Opção C — Acionamento reativo via broker de mensagens
@@ -60,13 +60,15 @@ A entry-point `src/worker.ts` espelha o padrão do `src/server.ts` existente, in
 
 O sistema passa a ter dois processos de longa duração em todos os ambientes: o servidor da API e o worker de webhooks. Ambientes de desenvolvimento, staging e produção precisam executar `npm run worker` (ou equivalente via container/supervisor) além do processo da API. Engenheiros que executarem apenas `npm run dev` não terão o processamento de webhooks ativo, o que deve constar de forma explícita no guia de setup local e no onboarding.
 
-A decisão de single-worker com ordering implícita por `created_at` é uma limitação documentada e consciente, não um defeito: garante ordenação dos eventos de um mesmo pedido enquanto houver apenas uma instância do worker. Escalar para múltiplos workers em paralelo exigiria particionamento por `order_id` ou locking pessimista com `SELECT ... FOR UPDATE SKIP LOCKED` — problema explicitamente adiado para o futuro ([09:13] Diego, [09:13] Larissa).
+A decisão de single-worker com ordering implícita por `order_id` é uma limitação documentada e consciente, não um defeito. O worker processa os eventos na ordem de `created_at` da outbox, e é esse mecanismo que garante a ordenação dos eventos de um mesmo pedido enquanto houver apenas uma instância em execução ([09:12] Diego). Não há garantia de ordenação global, apenas por `order_id` e enquanto for single-worker ([09:13] Larissa); os clientes não requisitaram ordenação global ([09:14] Marcos). Escalar para múltiplos workers em paralelo exigiria particionamento por `order_id` ou lock pessimista — problema explicitamente adiado para o futuro ([09:13] Diego, [09:13] Larissa).
 
-O worker deve implementar shutdown gracioso (SIGINT/SIGTERM) para garantir que eventos com status `PROCESSING` retornem a `PENDING` caso o processo seja encerrado durante uma tentativa, evitando que eventos fiquem presos indefinidamente. [PRECISA DE INFORMAÇÃO: Qual é o comportamento esperado para eventos com status `PROCESSING` no momento de um shutdown não-gracioso (ex: SIGKILL)? Devem retornar automaticamente a `PENDING` por lógica de health check periódico, ou é responsabilidade do operador intervir manualmente?]
+O worker deve implementar shutdown gracioso para SIGINT/SIGTERM, espelhando o tratamento já existente em `src/server.ts:13-21` — que encerra o processo e chama `prisma.$disconnect()`, sem qualquer reconciliação de estado.
+
+O destino de eventos que fiquem presos em `PROCESSING` quando o worker é encerrado no meio de uma tentativa permanece em aberto: o tema não foi discutido na reunião e não há precedente no código atual, que não possui reaper, lease, lock ou timeout de job em nenhum módulo de `src/`. [PRECISA DE INFORMAÇÃO: Eventos que fiquem em `PROCESSING` após um encerramento abrupto (ex: SIGKILL) devem retornar automaticamente a `PENDING` — por lógica de recuperação periódica baseada na idade do registro — ou é responsabilidade do operador intervir manualmente? A definição deve estabelecer também se o shutdown gracioso reconcilia o estado dos eventos em andamento antes de encerrar, indo além do que o `server.ts` faz hoje.]
 
 ## 7. Referências
 
-- `src/server.ts` — entry-point da API; `src/worker.ts` deve espelhar este padrão com loop de polling no lugar do servidor HTTP.
-- `src/config/database.ts` — factory do cliente de banco; o worker instancia o cliente de banco de forma independente usando a mesma `DATABASE_URL`.
+- `src/server.ts` — entry-point da API; `src/worker.ts` deve espelhar este padrão com loop de polling no lugar do servidor HTTP. O shutdown gracioso de referência está em `src/server.ts:13-21`.
+- `src/config/database.ts` — factory `createPrismaClient()` (linha 4) e singleton `prisma` (linha 10); o worker usa o mesmo módulo e a mesma `DATABASE_URL`, com cliente próprio por ser outro processo ([09:30] Bruno).
 - `package.json` — local onde o script `npm run worker` deve ser adicionado, análogo a `npm run dev` e `npm start`.
 - `TRANSCRICAO.md:[09:09]–[09:13]` — decisões de polling, processo separado, ordering e limitações de escala horizontal.

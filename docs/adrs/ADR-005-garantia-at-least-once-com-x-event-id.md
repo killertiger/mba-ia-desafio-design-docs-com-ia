@@ -32,7 +32,7 @@ O UUID gerado na inserção da outbox é o mesmo identificador disponível no hi
 
 Adotada a **Opção A — at-least-once com idempotência via X-Event-Id**, porque elimina a complexidade de coordenação bidirecional do exactly-once enquanto oferece mecanismo suficiente para que clientes B2B implementem deduplicação — padrão amplamente documentado e adotado por plataformas de referência como Stripe e GitHub ([09:25] Diego). A semântica at-least-once é compatível com a estratégia de retry com backoff exponencial adotada pelo worker, onde tentativas subsequentes são esperadas e necessárias.
 
-[NECESSITA INFORMAÇÃO: O UUID deve ser do tipo v4 (aleatório) ou v7 (baseado em timestamp, com melhor ordenação para debugging e consultas temporais)? A escolha afeta a estratégia de indexação na tabela de outbox e a interpretação do identificador pelos clientes.]
+O `event_id` é um UUID v4, seguindo a convenção do projeto. Larissa fechou a decisão de identificadores em `[09:51]`: "UUID, segue o padrão do resto do projeto. Tudo é uuid", e todos os models atuais usam `@default(uuid())` do Prisma, que gera v4. Adotar v7 (baseado em timestamp, com melhor ordenação para consultas temporais) seria um desvio consciente dessa convenção e exigiria justificativa própria; não há motivo levantado na reunião para tal.
 
 ## 5. Prós e Contras das Opções
 
@@ -61,7 +61,7 @@ A adoção de at-least-once como contrato público implica que qualquer cliente 
 
 O UUID gerado na inserção da outbox deve ser imutável em todas as retentativas. Uma falha nesse contrato interno — por exemplo, geração do UUID no momento do envio em vez da inserção — quebraria silenciosamente a garantia de idempotência sem erro explícito, tornando a deduplicação do lado do cliente não determinística. Esse é um ponto de atenção crítico para engenheiros que implementarem o worker.
 
-[NECESSITA INFORMAÇÃO: O `event_id` deve ser exposto tanto no header `X-Event-Id` quanto no corpo do payload JSON? A especificação mencionada em [09:43] sugere que sim, mas não foi formalmente confirmada. A decisão afeta os clientes que processam apenas o corpo do payload sem inspecionar headers.]
+O `event_id` é exposto tanto no header `X-Event-Id` quanto no corpo do payload JSON. Em `[09:43]` Diego define o corpo do evento com `event_id` como primeiro campo do JSON, e em `[09:44]` define o header `X-Event-Id` com o mesmo UUID. A dupla exposição atende clientes que dedupam pelo header e clientes que processam apenas o corpo do payload sem inspecionar headers.
 
 ## 7. Referências
 

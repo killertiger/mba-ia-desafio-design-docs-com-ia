@@ -20,8 +20,7 @@ A rotação de secrets sem janela de inatividade é requisito operacional para c
 - O comprometimento de uma secret não pode afetar outros endpoints ou clientes (isolamento de blast radius)
 - A rotação de secrets deve ser possível sem janela de manutenção sincronizada entre plataforma e cliente
 - O mecanismo deve ser compatível com bibliotecas disponíveis em qualquer linguagem de programação (`[09:20]` Sofia: "todo cliente sério tem biblioteca pra isso")
-- Todas as URLs de destino devem usar TLS obrigatoriamente — URLs `http://` devem ser rejeitadas em validação de schema (`[09:23]` Sofia, confirmado por Larissa)
-- [NECESSITA INFORMAÇÃO: Qual é a política de comprimento mínimo e fonte de entropia para secrets geradas automaticamente? A transcrição `[09:31]` Marcos sugere geração pela plataforma, mas não especifica requisitos de entropia.]
+- Todas as URLs de destino devem usar TLS obrigatoriamente — URLs `http://` devem ser rejeitadas em validação de schema (`[09:23]` Sofia)
 
 ## 3. Opções Consideradas
 
@@ -33,11 +32,11 @@ A rotação de secrets sem janela de inatividade é requisito operacional para c
 
 Escolhida a **Opção A — HMAC-SHA256 com secret única por endpoint e grace period de 24 horas**, conforme declarado por Sofia em `[09:22]`: "Decidido: HMAC-SHA256 sobre o corpo do request, secret por endpoint, suporte a rotação com grace period de 24h."
 
-O algoritmo SHA-256 foi escolhido por ser padrão de mercado adotado por Stripe e GitHub, garantindo que clientes B2B já possuam bibliotecas disponíveis para verificação. A granularidade por endpoint — em vez de secret global — foi motivada pelo princípio de blast radius: o vazamento de uma secret compromete apenas o endpoint afetado, não toda a integração do cliente. O grace period de 24 horas permite que o cliente atualize seus sistemas de forma escalonada sem coordenação em tempo real com a plataforma.
+O algoritmo SHA-256 foi escolhido por ser padrão de mercado, garantindo que clientes B2B já possuam bibliotecas disponíveis para verificação (`[09:20]` Sofia: "HMAC-SHA256 é o padrão de mercado, todo cliente sério tem biblioteca pra isso"). A granularidade por endpoint — em vez de secret global — foi motivada pelo princípio de blast radius: o vazamento de uma secret compromete apenas o endpoint afetado, não toda a integração do cliente. O grace period de 24 horas permite que o cliente atualize seus sistemas de forma escalonada sem coordenação em tempo real com a plataforma.
 
 Cada request de webhook inclui os headers: `X-Event-Id` (UUID do evento para idempotência), `X-Signature` (HMAC-SHA256 sobre o corpo), `X-Timestamp` (timestamp de envio para detecção opcional de replay attack), `X-Webhook-Id` (UUID do endpoint, para clientes com múltiplos endpoints cadastrados — `[09:44]`–`[09:45]` Sofia), e `Content-Type: application/json`.
 
-[NECESSITA INFORMAÇÃO: A secret é entregue ao cliente apenas uma vez no momento da criação, ou é recuperável via GET posterior? A transcrição `[09:31]` Marcos indica geração pela plataforma, mas não define a política de exposição pós-criação. A prática recomendada é entrega única — recuperação exigiria nova rotação.]
+A secret é gerada pela plataforma e devolvida ao cliente no momento da criação do webhook (`[09:31]` Marcos).
 
 ## 5. Prós e Contras das Opções
 
@@ -78,9 +77,13 @@ A adoção desta arquitetura de segurança cria um gate de processo explícito: 
 
 O schema de dados do módulo de webhooks deve suportar dois campos de secret simultâneos por endpoint (`secret_current` e `secret_previous`), com timestamp de expiração da secret anterior. A lógica do worker deve usar a secret vigente para assinar; qualquer endpoint de validação de entrada deve aceitar ambas durante o grace period de 24 horas. As secrets também devem ser adicionadas às regras de redação de logs existentes em `src/shared/logger/index.ts` para evitar exposição acidental.
 
-[NECESSITA INFORMAÇÃO: Como o sistema deve se comportar quando um cliente ainda usa a secret anterior após o grace period de 24 horas expirar? O erro deve ser explícito (HTTP 401 com código `WEBHOOK_SECRET_EXPIRED`) ou silencioso? A transcrição não define este comportamento de borda.]
+[PRECISA DE INFORMAÇÃO: Qual é a política de comprimento mínimo e fonte de entropia para as secrets geradas automaticamente? A transcrição (`[09:31]` Marcos) estabelece que a secret é gerada pela plataforma, mas não especifica requisitos de entropia, e não há precedente no código atual — o projeto usa bcrypt para senhas e valida `JWT_SECRET` com no mínimo 16 caracteres (`src/config/env.ts:8`), sem geração aleatória de segredos.]
 
-[NECESSITA INFORMAÇÃO: A proteção contra replay attack via `X-Timestamp` ficará para implementação futura obrigatória ou é opcional para o cliente? `[09:44]` Diego menciona o header, mas a reunião não define se a plataforma fará validação da janela temporal ou apenas documentará a semântica para os clientes.]
+[PRECISA DE INFORMAÇÃO: A secret é recuperável via GET após a criação, ou é entregue apenas uma vez? A transcrição define que ela é devolvida na criação (`[09:31]` Marcos), mas não a política de exposição posterior. A prática recomendada é entrega única — recuperação exigiria nova rotação.]
+
+[PRECISA DE INFORMAÇÃO: Como o sistema deve se comportar quando um cliente ainda usa a secret anterior após o grace period de 24 horas expirar? O erro deve ser explícito (HTTP 401 com código `WEBHOOK_SECRET_EXPIRED`) ou silencioso? A transcrição não define este comportamento de borda.]
+
+[PRECISA DE INFORMAÇÃO: A proteção contra replay attack via `X-Timestamp` ficará para implementação futura obrigatória ou é opcional para o cliente? `[09:44]` Diego menciona o header, mas a reunião não define se a plataforma fará validação da janela temporal ou apenas documentará a semântica para os clientes.]
 
 ## 7. Referências
 
