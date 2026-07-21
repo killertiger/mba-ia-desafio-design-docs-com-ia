@@ -4,6 +4,9 @@
 
 O desafio consiste em gerar os documentos de design docs que irão auxiliar a guiar o projeto. Os documentos podem tanto ser consumidos por humanos quanto por outras IAs para geração de código e garantir a qualidade do sistema.
 
+Em alguns pontos do documento, estão marcados como `PRECISA DE INFORMAÇÃO` de propósito.
+O fato é que algumas decisões não foram tomadas e explicitadas na reunião, e como o próprio desafio pede para não inventar decisões, deixei esses pontos em aberto para que o time decida posteriormente. Porém, caso exista algum comportamento já definido no código, então este será também utilizado para auxiliar na decisão.
+
 ## Ferramentas utilizadas:
 - Claude - todo o desenvolvimento dos documentos foi utilizado o Claude com o modelo Opus 4.8
 
