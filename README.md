@@ -67,6 +67,7 @@ Após a geração de todos os arquivos, revisão arquivo por arquivo:
 - Prompt para revisar arquivo considerando documentos + código + TRANSCRICAO.md
 - Atualização do TRACKER.md
 
+Revisão geral dos arquivos removendo referências a TRANSCRICAO.md
 
 ## Como navegar a entrega
 - Todos os arquivos estão disponíveis na pasta docs/...
