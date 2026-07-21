@@ -119,7 +119,7 @@ O OMS não possui hoje nenhum mecanismo de notificação externa, eventos ou fil
 - **Payload acima de 64KB:** o evento não é enviado e é tratado como erro, não truncado `[09:23]`, `[09:24]`.
 - **Nenhum endpoint subscrito ao status:** nenhum evento é criado. Não é erro, é o caminho esperado.
 - **Rotação de secret dentro do grace period de 24h:** o worker assina com a secret vigente; a anterior permanece válida do lado do cliente até expirar `[09:21]`.
-- **Shutdown gracioso (SIGINT/SIGTERM):** o worker finaliza o lote em andamento e devolve eventos `PROCESSING` remanescentes a `PENDING` antes de encerrar.
+- **Shutdown (SIGINT/SIGTERM):** o worker trata os sinais espelhando `src/server.ts:13-21`, que encerra o processo e chama `prisma.$disconnect()` sem reconciliar estado. **[BLOQUEADOR]** Se o shutdown gracioso deve, além disso, devolver eventos `PROCESSING` em andamento a `PENDING` antes de encerrar não foi decidido na reunião. Ver ADR-002.
 - **[BLOQUEADOR] Shutdown não gracioso (SIGKILL) ou crash:** o comportamento de recuperação de eventos travados em `PROCESSING` não foi decidido na reunião. Sem essa definição, o worker não pode ser considerado seguro para produção, pois eventos ficam órfãos indefinidamente. Ver ADR-002 e ADR-003.
 
 **Diagrama de sequência (fluxo principal)**
@@ -181,7 +181,7 @@ Base path `/api/v1`, conforme `src/app.ts`. Todos os endpoints de configuração
 
 - Tipo: function
 - Assinatura: `publishWebhookEvent(tx: Prisma.TransactionClient, order: Order, fromStatus: OrderStatus | null, toStatus: OrderStatus): Promise<void>`
-- Semântica: função pura que recebe o `tx` da transação em andamento, sem injetar repository inteiro no `OrderService` `[09:41]`, `[09:44]`. Lança exceção em caso de falha de insert, propagando o rollback da transação chamadora.
+- Semântica: função pura que recebe o `tx` da transação em andamento, sem injetar repository inteiro no `OrderService` `[09:41]`. Lança exceção em caso de falha de insert, propagando o rollback da transação chamadora.
 
 #### Contrato 2: cadastrar endpoint de webhook
 
@@ -311,7 +311,7 @@ Base path `/api/v1`, conforme `src/app.ts`. Todos os endpoints de configuração
 | `X-Event-Id` | UUID do evento, gerado na inserção da outbox e imutável entre tentativas. Chave de deduplicação do lado do cliente `[09:25]`. |
 | `X-Signature` | HMAC-SHA256 do corpo do request, calculado com a secret do endpoint `[09:20]`. |
 | `X-Timestamp` | Timestamp do envio, para o cliente detectar replay attack se quiser `[09:44]`. |
-| `X-Webhook-Id` | UUID do endpoint cadastrado, para clientes com múltiplos cadastros identificarem qual caiu naquele envio `[09:45]`. |
+| `X-Webhook-Id` | UUID do endpoint cadastrado, para clientes com múltiplos cadastros identificarem qual caiu naquele envio `[09:44]`. |
 | `Content-Type` | `application/json` `[09:44]`. |
 
 **Exemplo de requisição (enviada pela plataforma)**
@@ -331,7 +331,7 @@ Base path `/api/v1`, conforme `src/app.ts`. Todos os endpoints de configuração
 ```
 
 > Campos derivados de `[09:43]`: `event_id`, `event_type`, `timestamp` ISO 8601, `order_id`, `order_number`, `from_status`, `to_status`, `customer_id` e campos básicos como `total_cents`. `items` não é enviado para não inflar o payload; o cliente busca em `GET /orders/:id` se precisar `[09:43]`.
-> **[BLOQUEADOR]** A presença do `event_id` no corpo, além do header, foi sugerida em `[09:43]` mas não confirmada formalmente. O exemplo acima assume presente; confirmar antes de fechar o contrato público. Ver ADR-005.
+> O `event_id` é exposto tanto no corpo do payload `[09:43]` quanto no header `X-Event-Id` `[09:44]`, atendendo a clientes que dedupam pelo header e a clientes que processam apenas o corpo. Ver ADR-005.
 
 **Exemplo de resposta esperada do cliente**
 
@@ -476,7 +476,7 @@ Condições que a operação torna candidatas naturais a alerta, registradas com
 
 **Nenhuma dependência nova é necessária.** Isso é consequência direta da decisão de reuso máximo `[09:30]` e do descarte de Redis `[09:07]`.
 
-> **[BLOQUEADOR]** A escolha entre UUID v4 e v7 para o `event_id` não foi decidida. A reunião fecha apenas "UUID, segue o padrão do resto do projeto" `[09:51]`, e o padrão atual do schema é `@default(uuid())`. A escolha afeta a estratégia de indexação da outbox e a ordenação temporal em debug. Ver ADR-005.
+> O `event_id` é UUID v4, seguindo o padrão do projeto: a reunião fechou "UUID, segue o padrão do resto do projeto" `[09:51]`, e o schema atual usa `@default(uuid())`, que gera v4. Adotar v7 seria desvio consciente da convenção, sem motivo levantado na reunião. Ver ADR-005.
 
 **Garantias de compatibilidade**
 
@@ -536,21 +536,19 @@ Nenhuma tem valor default proposto. Cada uma exige decisão humana antes do cód
 
 | # | Bloqueador | Bloqueia | Origem |
 | --- | --- | --- | --- |
-| 1 | Recuperação de eventos travados em `PROCESSING` após SIGKILL ou crash | Loop do worker, seção 4 | ADR-002, ADR-003 |
+| 1 | Recuperação de eventos travados em `PROCESSING` (após SIGKILL/crash, e se o shutdown gracioso deve reconciliá-los antes de encerrar) | Loop do worker, seção 4 | ADR-002, ADR-003 |
 | 2 | Semântica do `attempt_count` após replay | Endpoint de replay e campos da DLQ, contrato 6 | ADR-003 |
 | 3 | Comprimento mínimo e fonte de entropia da secret | Geração de secret, contrato 2 | ADR-004 |
 | 4 | Política de exposição da secret pós-criação | Contratos 2 e 3 | ADR-004 |
 | 5 | Comportamento após expirar o grace period de 24h | Matriz de erros, seção 6 | ADR-004 |
-| 6 | UUID v4 ou v7 para `event_id` | Schema Prisma e indexação da outbox | ADR-005 |
-| 7 | `event_id` no corpo do payload além do header | Contrato público de saída, contrato 7 | ADR-005 |
-| 8 | Stack de métricas | Seção 7 e critério de aceite 24 | Não discutido na reunião; ausente do código |
-| 9 | Stack de tracing | Seção 7 | Não discutido na reunião; ausente do código |
-| 10 | Painéis e alertas | Seção 7 | Dependente do bloqueador 8 |
-| 11 | Política de retenção da DLQ | Operação, não bloqueia o código da entrega | ADR-003 |
-| 12 | Política de retenção e arquivamento da outbox | Operação, não bloqueia o código da entrega | `[09:08]`, declarado fora do escopo |
-| 13 | Validação da janela temporal do `X-Timestamp` | Escopo do worker e documentação ao cliente | ADR-004 |
+| 6 | Stack de métricas | Seção 7 e critério de aceite 24 | Não discutido na reunião; ausente do código |
+| 7 | Stack de tracing | Seção 7 | Não discutido na reunião; ausente do código |
+| 8 | Painéis e alertas | Seção 7 | Dependente do bloqueador 6 |
+| 9 | Política de retenção da DLQ | Operação, não bloqueia o código da entrega | ADR-003 |
+| 10 | Política de retenção e arquivamento da outbox | Operação, não bloqueia o código da entrega | `[09:08]`, declarado fora do escopo |
+| 11 | Validação da janela temporal do `X-Timestamp` | Escopo do worker e documentação ao cliente | ADR-004 |
 
-Os itens 1 a 7 bloqueiam trechos específicos de implementação. Os itens 8 a 10 bloqueiam a verificação automática do comportamento em produção. Os itens 11 a 13 não bloqueiam a codificação da entrega, mas precisam de decisão antes da operação em produção.
+Os itens 1 a 5 bloqueiam trechos específicos de implementação. Os itens 6 a 8 bloqueiam a verificação automática do comportamento em produção. Os itens 9 a 11 não bloqueiam a codificação da entrega, mas precisam de decisão antes da operação em produção.
 
 ---
 
@@ -561,7 +559,7 @@ Os itens 1 a 7 bloqueiam trechos específicos de implementação. Os itens 8 a 1
 - **Probabilidade:** média
 - **Impacto:** alto. O método concentra transição de estado, débito e reposição de estoque e auditoria. Uma regressão afeta o núcleo do produto, não apenas a feature nova.
 - **Mitigação:**
-    - Usar função pura recebendo o `tx`, sem injetar repository no `OrderService`, limitando a superfície da mudança `[09:41]`, `[09:44]`.
+    - Usar função pura recebendo o `tx`, sem injetar repository no `OrderService`, limitando a superfície da mudança `[09:41]`.
     - Inserir a chamada como último passo antes da leitura de `refreshed`, sem tocar em validação, estoque ou histórico.
     - Testes ponta a ponta cobrindo rollback forçado, conforme critérios de aceite 3 e 4.
     - Meia sprint reservada especificamente para integração e testes ponta a ponta `[09:46]`.
@@ -575,7 +573,7 @@ Os itens 1 a 7 bloqueiam trechos específicos de implementação. Os itens 8 a 1
 - **Mitigação:**
     - Índices em `status` e `created_at` desde a primeira migração, seguindo o padrão de `@@index` já usado em `orders` `[09:08]`.
     - Leitura do worker em batch pequeno, apenas de eventos `PENDING` elegíveis `[09:08]`.
-    - Resolver os bloqueadores 11 e 12 antes da operação em produção.
+    - Resolver os bloqueadores 9 e 10 antes da operação em produção.
 - **Plano de contingência:** purge manual de linhas `DELIVERED` mais antigas que 30 dias, janela citada em `[09:08]`, executado como tarefa operacional pontual até haver política formal.
 
 #### Risco 3: prazo de 3 sprints contra expectativa comercial da Atlas
@@ -615,8 +613,8 @@ Os itens 1 a 7 bloqueiam trechos específicos de implementação. Os itens 8 a 1
 - **Probabilidade:** média
 - **Impacto:** médio. Eventos ficam presos indefinidamente e não são entregues nem vão para a DLQ, sem erro visível.
 - **Mitigação:**
-    - Shutdown gracioso em SIGINT e SIGTERM, devolvendo o lote a `PENDING`.
-    - **Insuficiente por si só:** não cobre SIGKILL nem crash. Ver bloqueador 1.
+    - Shutdown gracioso em SIGINT e SIGTERM espelhando `src/server.ts:13-21`. Se ele deve reconciliar eventos `PROCESSING` em andamento ainda depende do bloqueador 1.
+    - **Insuficiente por si só:** o tratamento atual não cobre SIGKILL nem crash, e a reconciliação no caso gracioso também não está definida. Ver bloqueador 1.
 - **Plano de contingência:** consulta manual por eventos em `PROCESSING` há mais tempo que o razoável e reset para `PENDING`, até que o bloqueador 1 seja resolvido.
 
 #### Risco 7: bombardeio do endpoint do cliente sem rate limiting de saída

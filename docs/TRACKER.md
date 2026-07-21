@@ -54,7 +54,7 @@ Cada linha liga um item registrado em um documento a uma origem verificável. Se
 | A1-11 | ADR-001 | L65 | Consequência | Arquivamento de eventos entregues após ~30 dias (fora do escopo) | TRANSCRICAO | `[09:08] Diego` |
 | A1-12 | ADR-001 | L67 | Limitação | Ordenação implícita por `order_id` válida apenas com single-worker | TRANSCRICAO | `[09:12] Diego` |
 | A1-13 | ADR-001 | L67 | Restrição | Clientes não requisitaram ordenação global | TRANSCRICAO | `[09:14] Marcos` |
-| A1-14 | ADR-001 | L35, L71 | Integração | Inserção na outbox como última operação de `changeStatus()` | CODIGO | `src/modules/orders/order.service.ts` |
+| A1-14 | ADR-001 | L35, L71 | Integração | Inserção na outbox dentro da transação de `changeStatus()` | CODIGO | `src/modules/orders/order.service.ts` |
 | A1-15 | ADR-001 | L72 | Integração | Novas tabelas `webhook_*` adicionadas via migração Prisma | CODIGO | `prisma/schema.prisma` |
 
 ### ADR-002 — Worker em Processo Separado com Polling
@@ -103,10 +103,10 @@ Cada linha liga um item registrado em um documento a uma origem verificável. Se
 | A4-01 | ADR-004 | L13 | Motivação | Caso real: cliente vazou secret em log de aplicação | TRANSCRICAO | `[09:22] Diego` |
 | A4-02 | ADR-004 | L13 | Fator | Cliente precisa validar origem e integridade do payload | TRANSCRICAO | `[09:19] Sofia` |
 | A4-03 | ADR-004 | L34 | Decisão | HMAC-SHA256 sobre o corpo do request | TRANSCRICAO | `[09:22] Sofia` |
-| A4-04 | ADR-004 | L36 | Fator | SHA-256 é padrão de mercado (Stripe, GitHub) | TRANSCRICAO | `[09:20] Sofia` |
+| A4-04 | ADR-004 | L36 | Fator | SHA-256 é padrão de mercado; todo cliente sério tem biblioteca | TRANSCRICAO | `[09:20] Sofia` |
 | A4-05 | ADR-004 | L36 | Decisão | Secret única por endpoint (isolamento de blast radius) | TRANSCRICAO | `[09:21] Sofia` |
 | A4-06 | ADR-004 | L36 | Decisão | Rotação de secret com grace period de 24h | TRANSCRICAO | `[09:21] Sofia` |
-| A4-07 | ADR-004 | L38 | Decisão | Headers `X-Event-Id`, `X-Signature`, `X-Timestamp`, `X-Webhook-Id` | TRANSCRICAO | `[09:44] Sofia` |
+| A4-07 | ADR-004 | L38 | Decisão | Headers `X-Event-Id`, `X-Signature`, `X-Timestamp`, `X-Webhook-Id` | TRANSCRICAO | `[09:44] Diego`, `[09:44] Sofia` (`X-Webhook-Id`) |
 | A4-08 | ADR-004 | L23 | RNF | TLS obrigatório; URL `http` rejeitada na validação Zod | TRANSCRICAO | `[09:23] Sofia` |
 | A4-09 | ADR-004 | L56-64 | Alternativa | Secret global descartada ("vaza uma, vaza tudo") | TRANSCRICAO | `[09:21] Sofia` |
 | A4-10 | ADR-004 | L66-73 | Alternativa | TLS sem assinatura de payload descartada | TRANSCRICAO | `[09:20] Sofia` |
@@ -131,8 +131,8 @@ Cada linha liga um item registrado em um documento a uma origem verificável. Se
 | A5-06 | ADR-005 | L29, L52-56 | Alternativa | At-most-once (sem retry) descartada | TRANSCRICAO | `[09:15] Diego` |
 | A5-07 | ADR-005 | L44 | Trade-off | Responsabilidade de deduplicação transferida ao cliente | TRANSCRICAO | `[09:25] Sofia` |
 | A5-08 | ADR-005 | L60 | Consequência | Semântica documentada no portal do desenvolvedor | TRANSCRICAO | `[09:26] Marcos` |
-| A5-09 | ADR-005 | L35 | Ponto em Aberto | Tipo de UUID: v4 (aleatório) vs. v7 (baseado em timestamp) | — | Lacuna — não discutido na reunião |
-| A5-10 | ADR-005 | L64 | Ponto em Aberto | `event_id` também no corpo do payload além do header? | TRANSCRICAO | `[09:43] Diego` (não fechado) |
+| A5-09 | ADR-005 | L35 | Decisão | `event_id` é UUID v4, seguindo o padrão do projeto; v7 seria desvio consciente | TRANSCRICAO | `[09:51] Larissa` |
+| A5-10 | ADR-005 | L64 | Decisão | `event_id` exposto no header `X-Event-Id` e também no corpo do payload | TRANSCRICAO | `[09:43] Diego` (corpo), `[09:44] Diego` (header) |
 | A5-11 | ADR-005 | L70 | Integração | Publicação do evento na outbox dentro de `changeStatus()` | CODIGO | `src/modules/orders/order.service.ts` |
 | A5-12 | ADR-005 | L68 | Integração | `event_id` indexado no schema e incluído nos logs do Pino | CODIGO | `prisma/schema.prisma` |
 
@@ -214,9 +214,9 @@ Cada linha liga um item registrado em um documento a uma origem verificável. Se
 | R-53 | RFC | L98 | Ponto em Aberto | Entropia e política de exposição da secret | TRANSCRICAO | `[09:31] Marcos` (não fechado) — ver A4-12, A4-13 |
 | R-54 | RFC | L99 | Ponto em Aberto | Comportamento após expirar o grace period de 24h | — | Lacuna — ver A4-14 |
 | R-55 | RFC | L100 | Ponto em Aberto | Quem valida a janela temporal do `X-Timestamp` | TRANSCRICAO | `[09:44] Diego` (não fechado) — ver A4-15 |
-| R-56 | RFC | L101 | Ponto em Aberto | Tipo do UUID: v4 vs. v7 | — | Lacuna — ver A5-09 |
-| R-57 | RFC | L102 | Ponto em Aberto | `event_id` também no corpo do payload | TRANSCRICAO | `[09:43] Diego` (não fechado) — ver A5-10 |
-| R-58 | RFC | L103 | Ponto em Aberto | Endurecimento de RBAC no CRUD de configuração | TRANSCRICAO | `[09:37] Sofia` (adiado) |
+| R-56 | RFC | §5 (removido) | Decisão | UUID v4 por convenção — resolvido no ADR-005, removido das questões em aberto do RFC | TRANSCRICAO | `[09:51] Larissa` — ver A5-09 |
+| R-57 | RFC | §5 (removido) | Decisão | `event_id` no corpo e no header — resolvido no ADR-005, removido das questões em aberto do RFC | TRANSCRICAO | `[09:43] Diego` (corpo), `[09:44] Diego` (header) — ver A5-10 |
+| R-58 | RFC | L101 | Ponto em Aberto | Endurecimento de RBAC no CRUD de configuração | TRANSCRICAO | `[09:37] Sofia` (adiado) |
 | R-59 | RFC | L105 | Exclusão | Email de aviso ao cliente fora de escopo desta fase | TRANSCRICAO | `[09:37] Larissa` |
 | R-60 | RFC | L105 | Exclusão | Dashboard visual fora de escopo (projeto do time de frontend) | TRANSCRICAO | `[09:40] Larissa` |
 
@@ -302,7 +302,7 @@ Cada linha liga um item registrado em um documento a uma origem verificável. Se
 | F-40 | FDD | L120 | Fluxo | Replay por ADMIN devolve a `PENDING` e audita o executor | TRANSCRICAO | `[09:18] Diego`, `[09:36] Sofia` |
 | F-41 | FDD | L121 | Fluxo | Payload acima de 64KB vira erro, sem truncar | TRANSCRICAO | `[09:23]`–`[09:24] Sofia, Diego` |
 | F-42 | FDD | L123 | Fluxo | Rotação: worker assina com a secret vigente | TRANSCRICAO | `[09:21] Sofia` |
-| F-43 | FDD | L124 | Fluxo | Shutdown gracioso devolve `PROCESSING` a `PENDING` | TRANSCRICAO | `[09:11] Diego` (derivado) |
+| F-43 | FDD | L122 | Fluxo | Shutdown gracioso devolve `PROCESSING` a `PENDING` | — | Asserção sem base na transcrição; conflita com o bloqueador do ADR-002 (reconciliação indefinida) — ver F-44 |
 | F-44 | FDD | L125 | Bloqueador | Recuperação de `PROCESSING` em SIGKILL ou crash não definida | — | Lacuna — ver A2-10, A3-14 |
 | F-45 | FDD | L129-158 | Diagrama | Sequência do fluxo principal (Mermaid) | TRANSCRICAO | Derivado de `[09:06]`–`[09:18]` |
 | F-46 | FDD | L162-172 | Diagrama | Estados do evento na outbox (Mermaid) | TRANSCRICAO | Derivado de `[09:08]`, `[09:17]`, `[09:18]` |
@@ -327,7 +327,7 @@ Cada linha liga um item registrado em um documento a uma origem verificável. Se
 | F-60 | FDD | L301-354 | Contrato | Evento outbound: POST em URL https do cliente | TRANSCRICAO | `[09:23] Sofia` |
 | F-61 | FDD | L309-315 | Contrato | Headers `X-Event-Id`, `X-Signature`, `X-Timestamp`, `X-Webhook-Id` | TRANSCRICAO | `[09:44] Diego`, `[09:45] Sofia` |
 | F-62 | FDD | L319-331 | Contrato | Campos do payload do evento | TRANSCRICAO | `[09:43] Diego` |
-| F-63 | FDD | L334 | Bloqueador | `event_id` no corpo além do header não confirmado | — | Lacuna — ver A5-10 |
+| F-63 | FDD | L334 | Decisão | `event_id` exposto no corpo e no header | TRANSCRICAO | `[09:43] Diego` (corpo), `[09:44] Diego` (header) — ver A5-10 |
 | F-64 | FDD | L346-352 | RNF | Limites: timeout 10s, 64KB, sem rate limit, latência alvo | TRANSCRICAO | `[09:42]`, `[09:24]`, `[09:39]`, `[09:02]` |
 | F-65 | FDD | L352 | Consequência | Payload e at-least-once viram contrato público versionado | TRANSCRICAO | `[09:26] Larissa` |
 
@@ -367,14 +367,14 @@ Cada linha liga um item registrado em um documento a uma origem verificável. Se
 | F-90 | FDD | L469 | Dependência | MySQL 8.0 sem `NOTIFY/LISTEN` motiva o polling | TRANSCRICAO | `[09:09] Diego` |
 | F-91 | FDD | L477 | Dependência | `node:crypto` nativo para HMAC, sem dependência nova | CODIGO | `package.json` (ausência de lib de cripto) |
 | F-92 | FDD | L479 | Decisão | Nenhuma dependência nova é necessária | TRANSCRICAO | `[09:07] Diego`, `[09:30] Larissa` |
-| F-93 | FDD | L481 | Bloqueador | UUID v4 ou v7 não definido | — | Lacuna — ver A5-09 |
+| F-93 | FDD | L481 | Decisão | `event_id` é UUID v4, seguindo o padrão do projeto | TRANSCRICAO | `[09:51] Larissa` — ver A5-09 |
 | F-94 | FDD | L485-489 | Compatibilidade | Nenhuma rota atual muda; schema só acrescenta; API roda sem o worker | CODIGO | `prisma/schema.prisma`, `src/app.ts` |
 | F-95 | FDD | L495-502 | Aceite | 8 critérios funcionais verificáveis | TRANSCRICAO | `[09:34]`, `[09:40]`, `[09:52]`, `[09:36]`, `[09:23]` |
 | F-96 | FDD | L506-508 | Aceite | 3 critérios de performance e latência | TRANSCRICAO | `[09:02]`, `[09:04]` |
 | F-97 | FDD | L512-521 | Aceite | 9 critérios de resiliência | TRANSCRICAO | `[09:17]`, `[09:42]`, `[09:18]`, `[09:21]`, `[09:11]`, `[09:12]` |
 | F-98 | FDD | L525-528 | Aceite | 4 critérios de observabilidade; o 24 depende de F-86 | TRANSCRICAO | `[09:36] Sofia` |
 | F-99 | FDD | L532 | Aceite | Gate de processo: revisão de segurança concluída | TRANSCRICAO | `[09:46] Sofia` |
-| F-100 | FDD | L539-551 | Bloqueador | Tabela consolidada de 13 pendências bloqueantes | — | 10 lacunas + 3 adiados; ver ADRs |
+| F-100 | FDD | L537-553 | Bloqueador | Tabela consolidada de 11 pendências bloqueantes | — | 8 lacunas + 3 de observabilidade (métricas/tracing/painéis); ver ADRs e seção 7 |
 | F-101 | FDD | L559-569 | Risco | Regressão no `changeStatus`; mitigação com `tx` e meia sprint de testes | TRANSCRICAO | `[09:41] Diego`, `[09:46] Larissa` |
 | F-102 | FDD | L569 | Contingência | Desativar endpoints reduz `publishWebhookEvent` a consulta vazia | TRANSCRICAO | `[09:34] Bruno` (derivado) |
 | F-103 | FDD | L571-579 | Risco | Crescimento das tabelas sem política de retenção | TRANSCRICAO | `[09:08] Diego` |
@@ -418,7 +418,7 @@ Cada linha liga um item registrado em um documento a uma origem verificável. Se
 | P-10 | PRD | L35 | Cenário | Cliente assina apenas SHIPPED e DELIVERED | TRANSCRICAO | `[09:34] Marcos` |
 | P-11 | PRD | L36 | Cenário | Endpoint fora por 2h de manutenção recebe tudo ao voltar | TRANSCRICAO | `[09:16] Diego` |
 | P-12 | PRD | L37 | Cenário | Cliente vazou secret e rotaciona com 24h de migração | TRANSCRICAO | `[09:21] Sofia`, `[09:22] Diego` |
-| P-13 | PRD | L38 | Cenário | Cliente com vários endpoints identifica qual recebeu o envio | TRANSCRICAO | `[09:45] Sofia` |
+| P-13 | PRD | L38 | Cenário | Cliente com vários endpoints identifica qual recebeu o envio | TRANSCRICAO | `[09:44] Sofia` |
 | P-14 | PRD | L39 | Cenário | Suporte consulta histórico de entregas para diagnóstico | TRANSCRICAO | `[09:34] Marcos` |
 | P-15 | PRD | L40 | Cenário | ADMIN reprocessa evento após o cliente voltar | TRANSCRICAO | `[09:18] Diego` |
 | P-16 | PRD | L44 | Implantação | Sistema existente: OMS em Node, TS, Express, Prisma e MySQL | CODIGO | `package.json`, `prisma/schema.prisma` |
@@ -563,9 +563,9 @@ Cada linha liga um item registrado em um documento a uma origem verificável. Se
 | Métrica | ADRs | RFC | FDD | PRD | Total |
 | --- | --- | --- | --- | --- | --- |
 | Itens rastreados | 74 | 77 | 117 | 124 | **392** |
-| Itens com fonte `TRANSCRICAO` | 56 | 64 | 77 | 103 | 300 |
+| Itens com fonte `TRANSCRICAO` | 57 | 65 | 78 | 103 | 303 |
 | Itens com fonte `CODIGO` | 12 | 5 | 27 | 8 | 52 |
-| Itens sem origem (`—`) | 6 | 8 | 13 | 13 | 40 |
+| Itens sem origem (`—`) | 5 | 7 | 12 | 13 | 37 |
 | Documentos cobertos | 5 de 5 | 1 de 1 | 1 de 1 | 1 de 1 | **8 de 8** |
 
 Por ADR: ADR-001 = 15 · ADR-002 = 13 · ADR-003 = 16 · ADR-004 = 18 · ADR-005 = 12.
@@ -584,24 +584,24 @@ A proporção entre `TRANSCRICAO` e `CODIGO` muda conforme a altura do documento
 
 | Documento | Composição |
 | --- | --- |
-| ADRs | 6 lacunas puras (`[NECESSITA INPUT]`). Os outros 4 pontos em aberto foram levantados na reunião mas não fechados, e por isso contam como `TRANSCRICAO`. |
-| RFC | 6 lacunas herdadas dos ADRs (R-49, R-51, R-52, R-54, R-56, R-75), 1 risco derivado de lacunas (R-69) e 1 remissão a documentos internos (R-76). |
-| FDD | 13 marcadores `[BLOQUEADOR]`, dos quais 3 são novos e nasceram da análise do código (F-86 métricas, F-87 tracing, F-88 painéis, todos ausentes de `src/` e de `package.json`). Os demais são herdados dos ADRs. |
+| ADRs | 5 lacunas puras (`[PRECISA DE INFORMAÇÃO]`). Os outros 3 pontos em aberto foram levantados na reunião mas não fechados, e por isso contam como `TRANSCRICAO`. |
+| RFC | 5 lacunas herdadas dos ADRs (R-49, R-51, R-52, R-54, R-75), 1 risco derivado de lacunas (R-69) e 1 remissão a documentos internos (R-76). |
+| FDD | 12 itens sem origem: 11 marcadores `[BLOQUEADOR]` — dos quais 3 nasceram da análise do código (F-86 métricas, F-87 tracing, F-88 painéis, todos ausentes de `src/` e de `package.json`) e os demais herdados dos ADRs — e 1 asserção de fluxo sem base na transcrição (F-43, que conflita com o bloqueador de shutdown do ADR-002). Os bloqueadores de UUID v4/v7 e de `event_id` no corpo saíram após a resolução no ADR-005. |
 | PRD | 13 pendências, das quais 6 são lacunas de produto identificadas na elaboração do próprio PRD (P-29 metas em regime, P-72 p95, P-76 disponibilidade, P-83 métricas, P-89 compliance, P-123 carga) e 7 são herdadas dos ADRs e do FDD. |
 
 **Onde as lacunas foram descobertas**
 
-As 40 lacunas não são 40 problemas distintos. A maioria é a mesma pendência aparecendo em documentos de alturas diferentes, o que é o comportamento correto de um tracker. O que importa é onde cada uma **apareceu pela primeira vez**:
+As 37 lacunas não são 37 problemas distintos. A maioria é a mesma pendência aparecendo em documentos de alturas diferentes, o que é o comportamento correto de um tracker. O que importa é onde cada uma **apareceu pela primeira vez**:
 
 | Origem da descoberta | Quantidade | Exemplos |
 | --- | --- | --- |
-| Geração dos ADRs (`[NECESSITA INPUT]`) | 6 | retenção da DLQ, `attempt_count` após replay, UUID v4/v7 |
+| Geração dos ADRs (`[PRECISA DE INFORMAÇÃO]`) | 5 | retenção da DLQ, `attempt_count` após replay, recuperação de `PROCESSING` |
 | Análise do código durante o FDD | 3 | ausência de métricas, tracing e alertas no projeto |
 | Elaboração do PRD (lacunas de produto) | 6 | metas em regime, p95, disponibilidade, compliance, carga |
 
 O padrão que isso revela: a reunião foi forte em decisão técnica e fraca em meta de produto. Definiu com precisão o que fazer quando o cliente cai, mas nunca definiu como é o sucesso em operação normal.
 
-> **Sobre os pontos em aberto:** são as lacunas identificadas honestamente durante a produção dos documentos, e não decisões inventadas para preencher espaço. Elas aparecem como `[NECESSITA INPUT]` nos ADRs, `[BLOQUEADOR]` no FDD e `[PENDÊNCIA]` no PRD, e foram promovidas à seção **"Questões em Aberto"** do RFC (`docs/RFC.md` § 5). A rastreabilidade cruzada entre elas está na coluna *Localização* (ex.: `ver A3-12`), permitindo seguir a mesma pendência através das quatro alturas de documento.
+> **Sobre os pontos em aberto:** são as lacunas identificadas honestamente durante a produção dos documentos, e não decisões inventadas para preencher espaço. Elas aparecem como `[PRECISA DE INFORMAÇÃO]` nos ADRs, `[BLOQUEADOR]` no FDD e `[PENDÊNCIA]` no PRD, e foram promovidas à seção **"Questões em Aberto"** do RFC (`docs/RFC.md` § 5). A rastreabilidade cruzada entre elas está na coluna *Localização* (ex.: `ver A3-12`), permitindo seguir a mesma pendência através das quatro alturas de documento.
 
 ## Cobertura dos documentos
 

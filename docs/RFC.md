@@ -98,9 +98,7 @@ Pontos levantados na reunião e **não decididos**, ou explicitamente adiados. C
 | 7 | **Entropia e exposição da secret.** Qual o comprimento mínimo e a fonte de entropia? A secret é recuperável via GET ou entregue uma única vez na criação? | Não definido — Marcos indica geração pela plataforma `[09:31]`, sem especificar. Item para a revisão de Sofia. | Lacuna (ADR-004) |
 | 8 | **Comportamento pós-grace period.** Cliente que ainda usa a secret anterior após 24h recebe erro explícito (`WEBHOOK_SECRET_EXPIRED`) ou falha silenciosa? | Comportamento de borda não definido. | Lacuna (ADR-004) |
 | 9 | **Validação de replay attack.** A plataforma validará a janela temporal do `X-Timestamp` ou apenas documentará a semântica para o cliente? | Diego menciona o header `[09:44]`, mas a reunião não define de quem é a validação. | Lacuna (ADR-004) |
-| 10 | **UUID v4 ou v7 para `event_id`.** Afeta indexação da outbox e ordenação temporal para debugging. | Larissa define "UUID, segue o padrão do resto do projeto" `[09:51]`, sem especificar versão. | Lacuna (ADR-005) |
-| 11 | **`event_id` no corpo do payload.** Além do header `X-Event-Id`, o campo aparece no JSON? | `[09:43]` sugere que sim, mas não foi formalmente confirmado. Afeta clientes que só processam o body. | Lacuna (ADR-005) |
-| 12 | **Endurecimento de RBAC no CRUD.** Hoje qualquer role autenticada configura webhooks. | Adiado — "Por enquanto sim. Mais pra frente a gente pode endurecer." | `[09:36]`–`[09:37]` Marcos, Sofia |
+| 10 | **Endurecimento de RBAC no CRUD.** Hoje qualquer role autenticada configura webhooks. | Adiado — "Por enquanto sim. Mais pra frente a gente pode endurecer." | `[09:36]`–`[09:37]` Marcos, Sofia |
 
 **Fora de escopo desta fase** (decidido, não em aberto): notificação por email ao cliente com webhook falhando — "Email tá fora de escopo dessa fase. Talvez próxima fase, depois que a gente medir o impacto" `[09:37]`; e dashboard visual para o cliente — "Painel é projeto separado do time de frontend" `[09:40]`.
 

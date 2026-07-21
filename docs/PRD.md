@@ -6,7 +6,7 @@ Responsável: Marcos (Product Manager), que abriu o contexto da feature `[09:00]
 
 > **Convenção de rastreabilidade**
 > `[hh:mm]` referencia a transcrição da reunião técnica (`TRANSCRICAO.md`). Caminhos como `src/...` referenciam código existente e verificado.
-> **[PENDÊNCIA]** marca ponto sem origem na transcrição nem no código. Seguindo a regra do desafio, nenhum valor foi inventado para preencher esses espaços. A lista consolidada está no fim do documento.
+> **[PENDÊNCIA]**x marca ponto sem origem na transcrição nem no código. Seguindo a regra do desafio, nenhum valor foi inventado para preencher esses espaços. A lista consolidada está no fim do documento.
 > Documentos relacionados: [RFC](./RFC.md), [FDD](./FDD.md), [ADRs](./adrs/), [Tracker](./TRACKER.md).
 
 ---
@@ -35,7 +35,7 @@ Cenários de uso chave
 - Um cliente cadastra um endpoint e escolhe receber apenas SHIPPED e DELIVERED, ignorando os demais status `[09:34]`.
 - O endpoint de um cliente fica indisponível durante uma manutenção planejada de 2 horas e recebe os eventos quando volta, sem perda `[09:16]`.
 - Um cliente vazou a secret em log e precisa rotacionar sem parar a integração, migrando os sistemas dele dentro de 24 horas `[09:21]`, `[09:22]`.
-- Um cliente que tem vários endpoints cadastrados precisa saber qual deles corresponde a um envio recebido `[09:45]`.
+- Um cliente que tem vários endpoints cadastrados precisa saber qual deles corresponde a um envio recebido `[09:44]`.
 - O suporte investiga por que um cliente não recebeu um evento e consulta o histórico de entregas com payload, resposta e tempo de resposta `[09:34]`.
 - Um evento esgotou todas as tentativas e um administrador o reprocessa manualmente após o cliente confirmar que voltou `[09:18]`.
 
@@ -117,7 +117,7 @@ O cliente registra uma URL que passará a receber notificações de mudança de 
 
 - O identificador do cliente vem no corpo ou no caminho da requisição, e não do token de autenticação, porque o token representa o usuário operador e não o cliente `[09:32]`.
 - Qualquer usuário autenticado pode cadastrar nesta fase, sem exigência de papel específico `[09:37]`.
-- Um mesmo cliente pode ter mais de um endpoint cadastrado, e cada envio identifica qual endpoint o originou `[09:45]`.
+- Um mesmo cliente pode ter mais de um endpoint cadastrado, e cada envio identifica qual endpoint o originou `[09:44]`.
 
 **Erros previstos**
 
@@ -499,7 +499,7 @@ A feature só funciona completamente com o processo de entrega em execução, al
 
 #### Técnica: decisões pendentes antes do início ou durante a implementação
 
-Treze pontos levantados ou omitidos na reunião seguem sem decisão e afetam trechos específicos da implementação. A lista completa está na seção 9 do [FDD](./FDD.md). Os mais críticos: recuperação de eventos travados após queda do processo de entrega, comprimento e entropia da secret, e escolha do tipo de identificador do evento.
+Onze pontos levantados ou omitidos na reunião seguem sem decisão e afetam trechos específicos da implementação. A lista completa está na seção 9 do [FDD](./FDD.md). Os mais críticos: recuperação de eventos travados após queda do processo de entrega, comprimento e entropia da secret, e escolha do tipo de identificador do evento.
 
 #### Externa: implementação da validação de assinatura pelos clientes B2B
 
